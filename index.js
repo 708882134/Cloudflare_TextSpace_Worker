@@ -7,12 +7,53 @@
 //基于GPLv3协议的开源特性
 
 const DEFAULT_FRONTEND_URL = "https://text-disk-ui.pages.dev";
-const ADMIN_COOKIE_MAX_AGE = 600; // 默认10min，登录有效期（秒），可改为 604800（7天）等
-
-let ADMIN_UUID = null;
+const ADMIN_COOKIE_MAX_AGE = 600;
 const KV_TTL = 60 * 60 * 24 * 7;
 const CACHE_TTL = 60 * 60 * 24 * 365;
+let ADMIN_UUID = null;
 let dbInitialized = false;
+function uuidv4() {
+  return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, (c) =>
+    (
+      c ^
+      (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))
+    ).toString(16),
+  );
+}
+function isFolder(name) {
+  return name.endsWith("/");
+}
+function getParentPath(path) {
+  const p = path.split("/").filter(Boolean);
+  p.pop();
+  return p.length ? p.join("/") + "/" : "";
+}
+function getBaseName(path) {
+  const p = path.split("/");
+  return isFolder(path) ? p[p.length - 2] + "/" : p[p.length - 1];
+}
+function getCookie(request, name) {
+  const cookieHeader = request.headers.get("Cookie") || "";
+  const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+function text(data, status = 200, headers = {}) {
+  return new Response(data, {
+    status,
+    headers: { "Content-Type": "text/plain;charset=utf-8", ...headers },
+  });
+}
+function sanitizePath(path) {
+  if (!path) return "";
+  if (path.includes("..")) throw new Error("非法文件名");
+  return path;
+}
 async function initDB(env) {
   if (dbInitialized) return;
   await env.DB.prepare(
@@ -41,32 +82,8 @@ async function putCFCache(request, token, path, content) {
   );
 }
 async function purgeCFCache(request, token, path) {
+  if (!token) return;
   return caches.default.delete(getCacheKey(request, token, path));
-}
-function uuidv4() {
-  return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, (c) =>
-    (
-      c ^
-      (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))
-    ).toString(16),
-  );
-}
-function isFolder(name) {
-  return name.endsWith("/");
-}
-function getParentPath(path) {
-  const p = path.split("/").filter(Boolean);
-  p.pop();
-  return p.length ? p.join("/") + "/" : "";
-}
-function getBaseName(path) {
-  const p = path.split("/");
-  return isFolder(path) ? p[p.length - 2] + "/" : p[p.length - 1];
-}
-function getCookie(request, name) {
-  const cookieHeader = request.headers.get("Cookie") || "";
-  const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`));
-  return match ? decodeURIComponent(match[1]) : null;
 }
 async function getKVKey(token, path) {
   const hash = await crypto.subtle.digest(
@@ -87,8 +104,9 @@ async function setShareCache(env, token, path, content, oldToken) {
     JSON.stringify({ token, content }),
     opts,
   );
-  if (oldToken && oldToken !== token)
+  if (oldToken && oldToken !== token) {
     await env.SHARE_KV.delete(await getKVKey(oldToken, path));
+  }
 }
 async function updateShareCache(env, token, path, content) {
   if (!env.SHARE_KV || !token) return;
@@ -99,8 +117,9 @@ async function updateShareCache(env, token, path, content) {
   );
 }
 async function deleteShareCache(env, token, path) {
-  if (env.SHARE_KV && token)
+  if (env.SHARE_KV && token) {
     await env.SHARE_KV.delete(await getKVKey(token, path));
+  }
 }
 async function getShareCache(env, token, path) {
   if (!env.SHARE_KV) return null;
@@ -170,8 +189,9 @@ async function deleteFile(env, filename) {
     )
       .bind(filename)
       .all();
-    if (r.results.length && r.results[0].token)
+    if (r.results.length && r.results[0].token) {
       items.push({ token: r.results[0].token, path: r.results[0].path });
+    }
     await env.DB.prepare("DELETE FROM files WHERE path = ?")
       .bind(filename)
       .run();
@@ -187,13 +207,14 @@ async function renameFile(env, oldName, newName) {
         .bind(newName)
         .all()
     ).results.length
-  )
+  ) {
     throw new Error("目标名称已存在");
+  }
   const isDir = isFolder(oldName);
   let tokens = [];
   if (isDir) {
-    const od = oldName.endsWith("/") ? oldName : oldName + "/",
-      nd = newName.endsWith("/") ? newName : newName + "/";
+    const od = oldName.endsWith("/") ? oldName : oldName + "/";
+    const nd = newName.endsWith("/") ? newName : newName + "/";
     const r = await env.DB.prepare(
       "SELECT token, path FROM files WHERE path LIKE ? || '%'",
     )
@@ -227,18 +248,20 @@ async function renameFile(env, oldName, newName) {
 }
 async function moveItem(env, itemName, targetFolder) {
   let target = targetFolder.endsWith("/") ? targetFolder : targetFolder + "/";
-  if (isFolder(itemName) && target.startsWith(itemName))
+  if (isFolder(itemName) && target.startsWith(itemName)) {
     throw new Error("不能将文件夹移动到自身或其子文件夹中");
-  const base = getBaseName(itemName),
-    newPath = target + base;
+  }
+  const base = getBaseName(itemName);
+  const newPath = target + base;
   if (
     (
       await env.DB.prepare("SELECT path FROM files WHERE path = ?")
         .bind(newPath)
         .all()
     ).results.length
-  )
+  ) {
     throw new Error("目标位置已存在同名文件");
+  }
   return renameFile(env, itemName, newPath);
 }
 async function getFileToken(env, filename) {
@@ -262,12 +285,13 @@ async function saveFileToken(env, filename, token) {
   )
     .bind(token, filename)
     .run();
-  if (res.changes === 0)
+  if (res.changes === 0) {
     await env.DB.prepare(
       "INSERT INTO files (path, is_folder, content, token, created_at, updated_at) VALUES (?, 0, '', ?, unixepoch(), unixepoch())",
     )
       .bind(filename, token)
       .run();
+  }
   await setShareCache(
     env,
     token,
@@ -275,6 +299,7 @@ async function saveFileToken(env, filename, token) {
     await getFileContent(env, filename),
     old,
   );
+  return { oldToken: old, newToken: token };
 }
 async function createNewFile(env, fullPath) {
   await env.DB.prepare(
@@ -293,7 +318,7 @@ async function createNewFolder(env, fullPath) {
 async function proxyFrontend(frontendUrl, request, ctx) {
   const cacheKey = new URL(frontendUrl);
   const cached = await caches.default.match(cacheKey);
-  if (cached)
+  if (cached) {
     return new Response(cached.body, {
       headers: {
         ...cached.headers,
@@ -301,6 +326,7 @@ async function proxyFrontend(frontendUrl, request, ctx) {
         "Content-Type": "text/html;charset=utf-8",
       },
     });
+  }
   const res = await fetch(frontendUrl, { cf: { cacheEverything: true } });
   const newRes = new Response(res.body, {
     status: res.status,
@@ -313,18 +339,6 @@ async function proxyFrontend(frontendUrl, request, ctx) {
   ctx.waitUntil(caches.default.put(cacheKey, newRes.clone()));
   return newRes;
 }
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-function text(data, status = 200, headers = {}) {
-  return new Response(data, {
-    status,
-    headers: { "Content-Type": "text/plain;charset=utf-8", ...headers },
-  });
-}
 export default {
   async fetch(request, env, ctx) {
     ADMIN_UUID = env.ADMIN_UUID || ADMIN_UUID;
@@ -334,8 +348,8 @@ export default {
     if (!ADMIN_UUID) return text("⚠️ 请设置环境变量 ADMIN_UUID", 400);
     if (parts[0] === "sub" && parts.length >= 3) {
       try {
-        const token = parts[1],
-          decodedPath = decodeURIComponent(parts.slice(2).join("/"));
+        const token = parts[1];
+        const decodedPath = decodeURIComponent(parts.slice(2).join("/"));
         const cached = await getCFCache(request, token, decodedPath);
         if (cached) return cached;
         const kv = await getShareCache(env, token, decodedPath);
@@ -345,8 +359,9 @@ export default {
         }
         await initDB(env);
         const saved = await getFileToken(env, decodedPath);
-        if (!saved || token !== saved)
+        if (!saved || token !== saved) {
           return text("Token无效或文件不存在", 403);
+        }
         const content = await getFileContent(env, decodedPath);
         ctx.waitUntil(
           Promise.all([
@@ -359,8 +374,9 @@ export default {
         return text("访问失败：" + e.message, 400);
       }
     }
-    if (parts[0] === "sub")
+    if (parts[0] === "sub") {
       return text("格式错误：/sub/<Token>/<路径>/<文件名>", 400);
+    }
     await initDB(env);
     if (pathname === "admin" || pathname.startsWith("admin/")) {
       if (
@@ -389,12 +405,17 @@ export default {
       }
       const adminToken = getCookie(request, "admin_token");
       if (adminToken !== ADMIN_UUID) return text("未登录", 401);
-      if (url.searchParams.get("action") === "get_tree")
+      if (url.searchParams.get("action") === "get_tree") {
         return json(await getFileList(env));
+      }
       if (body.startsWith("FILE_TOKEN|")) {
         const [_, filename, custom] = body.split("|");
         if (!filename) return text("缺少文件名", 400);
-        await saveFileToken(env, filename, custom?.trim() || uuidv4());
+        const finalToken = custom?.trim() || uuidv4();
+        const result = await saveFileToken(env, filename, finalToken);
+        if (result.oldToken && result.oldToken !== result.newToken) {
+          ctx.waitUntil(purgeCFCache(request, result.oldToken, filename));
+        }
         return text(await getFileToken(env, filename));
       }
       if (body.startsWith("GET_TOKEN|")) {
@@ -408,14 +429,16 @@ export default {
           switch (op) {
             case "new": {
               const full = (args[1] || "") + args[0]?.trim();
+              sanitizePath(full);
               if (
                 (
                   await env.DB.prepare("SELECT path FROM files WHERE path = ?")
                     .bind(full)
                     .all()
                 ).results.length
-              )
+              ) {
                 throw new Error("文件已存在");
+              }
               await createNewFile(env, full);
               return json({ success: true, path: full });
             }
@@ -423,14 +446,16 @@ export default {
               let fn = args[0]?.trim();
               if (!fn) throw new Error("文件夹名不能为空");
               const full = (args[1] || "") + (fn.endsWith("/") ? fn : fn + "/");
+              sanitizePath(full);
               if (
                 (
                   await env.DB.prepare("SELECT path FROM files WHERE path = ?")
                     .bind(full)
                     .all()
                 ).results.length
-              )
+              ) {
                 throw new Error("文件夹已存在");
+              }
               await createNewFolder(env, full);
               return json({ success: true, path: full });
             }
@@ -482,11 +507,13 @@ export default {
           request.headers.get("X-File-Name") || "",
         );
         if (!filename) return text("缺少文件名", 400);
+        sanitizePath(filename);
         const inlineToken = request.headers.get("X-File-Token")
           ? decodeURIComponent(request.headers.get("X-File-Token"))
           : null;
         const used = await saveFileContent(env, filename, body, inlineToken);
-        if (used) ctx.waitUntil(purgeCFCache(request, used, filename));
+        if (used) {
+        }
         return text("保存成功");
       }
       if (url.searchParams.get("action") === "get_content") {
@@ -503,3 +530,4 @@ export default {
     return text("Not Found", 404);
   },
 };
+
