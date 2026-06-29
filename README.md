@@ -6,6 +6,22 @@
 
 ![GitHub License](https://img.shields.io/github/license/yourusername/CF-Text-Cloud?style=flat-square)
 ![Cloudflare Workers](https://img.shields.io/badge/Platform-Cloudflare%20Workers-F38020?style=flat-square&logo=cloudflare)
+loudflare TextSpace Worker 的原生 macOS 客户端，SwiftUI 构建，界面风格参考 macOS「备忘录」。
+
+## 功能
+
+- 连接 Cloudflare Worker 文本云盘（Bearer 认证）
+- 文件树浏览、文本/JSON 在线编辑、图片预览
+- 新建文件 / 文件夹、右键分享 / 重命名 / 删除
+- **拖拽**文件到文件夹移动
+- 上传 JSON / JPG / PNG
+- **自动同步**：MD5 增量备份到本地目录
+- 连接状态、使用教程、保存提示
+
+## 系统要求
+
+- macOS 14.0+
+- Xcode 15+（自行编译）
 
 ## ✨ 核心特性
 
