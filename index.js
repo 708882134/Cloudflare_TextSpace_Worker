@@ -7,7 +7,7 @@
 //基于GPLv3协议的开源特性
 
 const DEFAULT_FRONTEND_URL = "https://text-disk-ui.pages.dev";
-const ADMIN_COOKIE_MAX_AGE = 3600; //默认1个小时，可按需修改
+const ADMIN_COOKIE_MAX_AGE = 36000; //默认1个小时，可按需修改
 const KV_TTL = 60 * 60 * 24 * 7;
 const CACHE_TTL = 60 * 60 * 24 * 365;
 let ADMIN_UUID = null;
